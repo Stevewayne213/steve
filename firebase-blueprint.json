@@ -1,0 +1,46 @@
+{
+  "entities": {
+    "ChargingPoint": {
+      "title": "Charging Point",
+      "description": "A location where EV charging is offered by a host.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Shop or host name" },
+        "type": { "type": "string", "enum": ["5A", "15A"] },
+        "pricePerHour": { "type": "number" },
+        "isBusy": { "type": "boolean" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "ownerId": { "type": "string", "description": "UID of the host" },
+        "address": { "type": "string" },
+        "rating": { "type": "number" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "type", "pricePerHour", "isBusy", "lat", "lng", "ownerId"]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "A reservation for a charging session.",
+      "type": "object",
+      "properties": {
+        "pointId": { "type": "string" },
+        "userId": { "type": "string" },
+        "startTime": { "type": "string", "format": "date-time" },
+        "durationMinutes": { "type": "number" },
+        "status": { "type": "string", "enum": ["pending", "active", "completed", "cancelled"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["pointId", "userId", "startTime", "durationMinutes", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/charging_points/{pointId}": {
+      "schema": "ChargingPoint",
+      "description": "Collection of all available charging locations."
+    },
+    "/bookings/{bookingId}": {
+      "schema": "Booking",
+      "description": "User reservations for charging slots."
+    }
+  }
+}

@@ -1,0 +1,75 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Reset / Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() { return request.auth != null; }
+    function isVerified() { return isSignedIn() && request.auth.token.email_verified == true; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+
+    // --- Validation Helpers ---
+    
+    function isValidChargingPoint(data) {
+      return data.name is string && data.name.size() <= 100 &&
+             data.type in ['5A', '15A'] &&
+             data.pricePerHour is number && data.pricePerHour >= 0 &&
+             data.isBusy is bool &&
+             data.lat is number && data.lng is number &&
+             data.ownerId == request.auth.uid &&
+             data.keys().hasAll(['name', 'type', 'pricePerHour', 'isBusy', 'lat', 'lng', 'ownerId']) &&
+             data.keys().size() >= 7;
+    }
+
+    function isValidBooking(data) {
+      return data.pointId is string &&
+             data.userId == request.auth.uid &&
+             data.startTime is timestamp &&
+             data.durationMinutes is number && data.durationMinutes > 0 &&
+             data.status in ['pending', 'active', 'completed', 'cancelled'] &&
+             data.createdAt == request.time &&
+             data.keys().hasAll(['pointId', 'userId', 'startTime', 'durationMinutes', 'status', 'createdAt']) &&
+             data.keys().size() == 6;
+    }
+
+    // --- Collections ---
+
+    match /charging_points/{pointId} {
+      allow get: if true; // Public discovery
+      allow list: if true; // Public discovery (filtered via queries)
+      
+      allow create: if isVerified() && isValidId(pointId) && isValidChargingPoint(incoming());
+      
+      allow update: if isVerified() && isOwner(existing().ownerId) && (
+        // Action: Toggle Availability
+        (incoming().diff(existing()).affectedKeys().hasOnly(['isBusy', 'updatedAt']) && incoming().isBusy is bool) ||
+        // Action: Edit Profile
+        (incoming().diff(existing()).affectedKeys().hasOnly(['name', 'pricePerHour', 'type', 'lat', 'lng', 'address', 'updatedAt']) && isValidChargingPoint(incoming()))
+      );
+
+      allow delete: if isVerified() && isOwner(existing().ownerId);
+    }
+
+    match /bookings/{bookingId} {
+      allow get: if isVerified() && (isOwner(existing().userId) || isOwner(get(/databases/$(database)/documents/charging_points/$(existing().pointId)).data.ownerId));
+      allow list: if isVerified() && (resource.data.userId == request.auth.uid);
+      
+      allow create: if isVerified() && isValidId(bookingId) && isValidBooking(incoming()) && 
+                    exists(/databases/$(database)/documents/charging_points/$(incoming().pointId));
+      
+      allow update: if isVerified() && (
+        // Action: User Cancel
+        (isOwner(existing().userId) && incoming().diff(existing()).affectedKeys().hasOnly(['status']) && incoming().status == 'cancelled') ||
+        // Action: Host Complete/Confirm
+        (isOwner(get(/databases/$(database)/documents/charging_points/$(existing().pointId)).data.ownerId) && 
+         incoming().diff(existing()).affectedKeys().hasOnly(['status']) && incoming().status in ['active', 'completed'])
+      );
+    }
+  }
+}
